@@ -52,3 +52,11 @@ describe("GET /health", () => {
     expect(response.body).toEqual({ status: "ok" });
   });
 });
+
+describe("GET /docs", () => {
+  it("expone la documentación interactiva de Swagger", async () => {
+    const response = await request(app).get("/docs/").redirects(1);
+    expect(response.status).toBe(200);
+    expect(response.text).toMatch(/swagger/i);
+  });
+});

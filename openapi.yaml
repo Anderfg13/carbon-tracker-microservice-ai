@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: Carbon Tracker Microservice
+  description: >
+    Microservicio de EcoLogistics para calcular las emisiones de CO2 de un
+    trayecto de carga, según el tipo de vehículo, el peso transportado y la
+    distancia recorrida.
+  version: 1.1.0
+  contact:
+    name: EcoLogistics Engineering
+servers:
+  - url: http://localhost:3000
+    description: Servidor local de desarrollo
+tags:
+  - name: Carbon
+    description: Cálculo de emisiones de CO2
+  - name: Health
+    description: Verificación de disponibilidad del servicio
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Verifica que el servicio esté disponible
+      responses:
+        "200":
+          description: El servicio está operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /api/carbon/calculate:
+    post:
+      tags: [Carbon]
+      summary: Calcula las emisiones de CO2 de un trayecto de carga
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CarbonCalculationInput"
+            examples:
+              trayectoDiesel:
+                summary: Camión diésel con 10 toneladas de carga
+                value:
+                  vehicleType: diesel
+                  cargoWeightTons: 10
+                  distanceKm: 100
+      responses:
+        "200":
+          description: Cálculo realizado con éxito
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarbonCalculationResult"
+        "400":
+          description: Datos de entrada inválidos (validación de dominio)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "La distancia recorrida (distanceKm) debe ser un número mayor a 0."
+        "500":
+          description: Error interno inesperado del servidor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    VehicleType:
+      type: string
+      enum: [electric, diesel, hybrid]
+    CarbonCalculationInput:
+      type: object
+      required: [vehicleType, cargoWeightTons, distanceKm]
+      properties:
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        cargoWeightTons:
+          type: number
+          minimum: 0
+          description: Peso de la carga en toneladas. 0 es válido (vehículo vacío).
+          example: 10
+        distanceKm:
+          type: number
+          exclusiveMinimum: 0
+          description: Distancia recorrida en kilómetros. Debe ser mayor a 0.
+          example: 100
+        efficiencyFactor:
+          type: number
+          exclusiveMinimum: 0
+          default: 1.0
+          description: >
+            Multiplicador de eficiencia respecto a la línea base del tipo de
+            vehículo. Opcional, por defecto 1.0.
+          example: 1.0
+    CarbonCalculationResult:
+      type: object
+      properties:
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        cargoWeightTons:
+          type: number
+          example: 10
+        distanceKm:
+          type: number
+          example: 100
+        efficiencyFactor:
+          type: number
+          example: 1.0
+        emissionFactorUsed:
+          type: number
+          description: Factor de emisión aplicado (kg CO2 / tonelada-km)
+          example: 0.162
+        co2EmissionsKg:
+          type: number
+          description: Emisiones totales calculadas, en kilogramos de CO2
+          example: 162
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string

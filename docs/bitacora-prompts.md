@@ -169,6 +169,76 @@ adicional de "revisión manual" que hubiera tomado tiempo aparte.
 
 ---
 
+## Fase 4 — Preparación para producción (ronda de mejoras post-revisión)
+
+Tras una revisión externa (con comentarios genéricos, no específicos a este
+repositorio), se decidió igualmente incorporar las tres sugerencias que sí
+eran técnicamente válidas en general, adaptadas al stack real del proyecto
+(TypeScript/Express, no Python/Flask):
+
+### Prompt 4.1 — Externalizar configuración (Instrucción directa + restricciones de diseño)
+
+```
+Externaliza los factores de emisión a un archivo de configuración externo,
+sin romper el diseño de inyección de dependencias que ya existe
+(EmissionFactorProvider). Requisitos:
+- Debe leer de config/emission-factors.json por defecto, con la ruta
+  configurable via variable de entorno EMISSION_FACTORS_PATH.
+- Si el archivo no existe o está mal formado, no debe tumbar el servicio:
+  debe caer de vuelta a los valores estáticos actuales y loggear una
+  advertencia.
+- No cambies el comportamiento por defecto de CarbonCalculator (para no
+  romper las pruebas existentes); expón esto como una implementación
+  adicional de EmissionFactorProvider, no como reemplazo del default.
+```
+
+**Resultado:** `ConfigFileEmissionFactorProvider.ts`, que implementa la
+misma interfaz que ya existía — el Principio de Inversión de Dependencias
+definido desde la Fase 1 permitió agregar esta fuente de datos alternativa
+sin tocar `CarbonCalculator`.
+
+### Prompt 4.2 — Documentación OpenAPI (Estructura específica)
+
+```
+Genera una especificación OpenAPI 3.0 completa (openapi.yaml) para esta API,
+incluyendo esquemas de request/response, ejemplos, y los códigos de estado
+200/400/500 ya implementados en el controlador. Luego integra swagger-ui-express
+para servirla en /docs.
+```
+
+### Prompt 4.3 — Prueba de integración a nivel Docker (Instructivo paso a paso)
+
+```
+Crea un Dockerfile multi-stage (build + producción) y un script de bash que:
+1. Construya la imagen.
+2. Levante un contenedor real.
+3. Espere a que /health responda.
+4. Haga un POST real a /api/carbon/calculate contra el contenedor (no contra
+   el código en memoria) y valide la respuesta.
+5. Valide también el caso de error 400.
+6. Limpie el contenedor al finalizar, incluso si algo falla.
+No puedo ejecutar Docker en este entorno de desarrollo — el script debe ser
+autocontenido para que se corra en cualquier máquina con Docker instalado.
+```
+
+**Nota de honestidad:** este script no se pudo ejecutar en el entorno donde
+se generó (no había Docker disponible), así que su corrección se validó por
+inspección, no por ejecución real — a diferencia de las pruebas con Jest,
+que sí corrieron. Queda pendiente que se ejecute `npm run docker:test` en
+una máquina con Docker para confirmarlo end-to-end.
+
+### Efecto colateral: la cobertura de pruebas bajó y hubo que restaurarla
+
+Al agregar `ConfigFileEmissionFactorProvider` y cablear `app.ts` con más
+lógica, la cobertura de branches cayó de ~90% a 83.72%, por debajo del
+umbral configurado en `jest.config.js` (85%). Se le pidió al LLM cerrar
+específicamente esas ramas no cubiertas (rama 500 del controlador, el
+constructor por defecto de las rutas, y el branch de "factor no encontrado"
+del proveedor estático) en vez de bajar el umbral — resultado: 97.16% de
+statements y 90.69% de branches, con 29 pruebas en total.
+
+---
+
 ## Resumen: técnica usada por fase
 
 | Fase | Técnica principal | Resultado concreto |
@@ -178,3 +248,4 @@ adicional de "revisión manual" que hubiera tomado tiempo aparte.
 | Modularización | Instrucción directa | Estructura domain/controllers/routes separada y testeable |
 | Pruebas | Few-shot dirigido a casos | Suite con 18 pruebas y 94.2% de cobertura |
 | Code Review | Persona (revisor senior) en sesión nueva | Validación de seguridad/SOLID sin cambios adicionales necesarios |
+| Producción | Instrucción directa con restricciones de diseño explícitas | Config externa, OpenAPI/Swagger y prueba Docker, sin romper el diseño ni bajar la cobertura |

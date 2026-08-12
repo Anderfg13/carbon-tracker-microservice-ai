@@ -6,29 +6,38 @@ carga y la distancia recorrida.
 
 ## Stack
 
-Node.js + TypeScript + Express · Jest + Supertest para pruebas.
+Node.js + TypeScript + Express · Jest + Supertest para pruebas · Docker para despliegue.
 
 ## Estructura del proyecto
 
 ```
 src/
   domain/
-    VehicleType.ts             enum de tipos de vehículo soportados
-    EmissionFactors.ts         tabla de factores de emisión (kg CO2 / t·km)
-    EmissionFactorProvider.ts  interfaz + implementación (inyección de dependencias)
-    CarbonCalculator.ts        lógica de negocio: validación + cálculo
-    errors.ts                  error de dominio InvalidCarbonInputError
+    VehicleType.ts                     enum de tipos de vehículo soportados
+    EmissionFactors.ts                 factores de emisión por defecto (fallback)
+    EmissionFactorProvider.ts          interfaz + implementación estática (inyección de dependencias)
+    ConfigFileEmissionFactorProvider.ts implementación que lee los factores desde config/ (o env var)
+    CarbonCalculator.ts                lógica de negocio: validación + cálculo
+    errors.ts                          error de dominio InvalidCarbonInputError
   controllers/
     carbonController.ts        traduce HTTP <-> dominio
   routes/
     carbonRoutes.ts            definición de rutas Express
-  app.ts                       fábrica de la app Express (usada también en tests)
+  app.ts                       fábrica de la app Express (usada también en tests); expone /docs
   server.ts                    arranque del servidor HTTP
 tests/
-  carbonCalculator.test.ts     pruebas unitarias de la lógica de negocio
-  carbonApi.test.ts            pruebas de integración de la API (Supertest)
+  carbonCalculator.test.ts               pruebas unitarias de la lógica de negocio
+  carbonController.test.ts               pruebas unitarias del controlador (incluye rama 500)
+  carbonRoutes.test.ts                   prueba del wiring por defecto de las rutas
+  staticEmissionFactorProvider.test.ts   pruebas del proveedor estático
+  configFileEmissionFactorProvider.test.ts pruebas del proveedor basado en config
+  carbonApi.test.ts                      pruebas de integración de la API (Supertest)
 docs/
   bitacora-prompts.md          registro de prompts usados durante el desarrollo
+config/
+  emission-factors.json        factores de emisión externalizados (editables sin redeploy)
+openapi.yaml                   especificación OpenAPI 3.0 de la API, servida en /docs
+Dockerfile, docker-compose.yml, scripts/test-docker.sh   empaquetado y prueba de integración en contenedor
 ```
 
 ## Fórmula de cálculo
@@ -100,18 +109,73 @@ Respuesta 400 (dato inválido, ej. `distanceKm: 0`):
 
 Verificación de disponibilidad del servicio.
 
+### `GET /docs`
+
+Documentación interactiva de la API (Swagger UI), generada a partir de
+`openapi.yaml`. Permite explorar los endpoints y probarlos directamente
+desde el navegador sin necesidad de Postman/curl.
+
+## Configuración externa de factores de emisión
+
+Los factores de emisión ya no están hardcodeados en el código: se leen de
+`config/emission-factors.json` en tiempo de arranque, a través de
+`ConfigFileEmissionFactorProvider`.
+
+```json
+{
+  "diesel": 0.162,
+  "hybrid": 0.09,
+  "electric": 0.03
+}
+```
+
+Para actualizar un factor (por ejemplo, cuando cambien los estándares de la
+industria) basta con editar ese archivo — no requiere tocar ni redeployar
+el código de la aplicación. También se puede apuntar a otra ubicación con
+la variable de entorno `EMISSION_FACTORS_PATH` (útil en Docker/producción).
+Si el archivo no existe o está mal formado, el servicio no falla: cae de
+vuelta a los valores estáticos por defecto (`EmissionFactors.ts`) y deja un
+`console.warn` para diagnosticarlo.
+
+## Docker
+
+```bash
+docker compose up --build
+# o manualmente:
+docker build -t carbon-tracker-microservice .
+docker run -p 3000:3000 carbon-tracker-microservice
+```
+
+El `Dockerfile` usa build multi-stage (compila TypeScript en una etapa,
+corre solo el `dist/` compilado + dependencias de producción en la otra) e
+incluye un `HEALTHCHECK` sobre `/health`.
+
+### Prueba de integración a nivel Docker
+
+```bash
+npm run docker:test
+```
+
+`scripts/test-docker.sh` construye la imagen, levanta un contenedor real,
+espera a que `/health` responda, y valida tanto un cálculo correcto
+(`POST /api/carbon/calculate`) como el caso de validación fallida (400),
+todo contra el contenedor real vía HTTP — no contra el código en memoria
+como hacen las pruebas de Supertest. Requiere Docker instalado localmente.
+
 ## Pruebas
 
 ```
-Test Suites: 2 passed, 2 total
-Tests:       18 passed, 18 total
-Cobertura:   94.2% statements / 90% branches / 100% functions / 94.2% lines
+Test Suites: 6 passed, 6 total
+Tests:       29 passed, 29 total
+Cobertura:   97.16% statements / 90.69% branches / 100% functions / 97.16% lines
 ```
 
 Casos de borde cubiertos: distancia cero y negativa, carga negativa (carga
 cero se acepta como válida), tipo de vehículo no soportado, factor de
-eficiencia cero y negativo, y entrada con tipo incorrecto (string en vez de
-number).
+eficiencia cero y negativo, entrada con tipo incorrecto (string en vez de
+number), errores inesperados en el controlador (rama 500), configuración de
+factores de emisión ausente/corrupta/con valores no numéricos, y el wiring
+por defecto de rutas y controlador cuando no se inyecta ninguna dependencia.
 
 ## Reflexión crítica: ventajas y riesgos de usar un LLM en este proceso
 
